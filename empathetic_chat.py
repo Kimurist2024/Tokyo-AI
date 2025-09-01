@@ -34,12 +34,14 @@ class EmpatheticChatBot:
     
     def create_prompt(self, user_input: str) -> str:
         """共感的なプロンプトを作成"""
-        system_prompt = "You are an empathetic assistant who provides supportive and understanding responses to help people feel heard and cared for."
+        system_prompt = "You are an empathetic assistant who provides supportive and understanding responses to help people feel heard and cared for. Respond in a warm, caring manner."
         
-        prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>
-{user_input}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-"""
+        # Phi-3モデル用のプロンプト形式
+        prompt = f"""<|system|>
+{system_prompt}<|end|>
+<|user|>
+{user_input}<|end|>
+<|assistant|>"""
         return prompt
     
     def generate_response(self, user_input: str, max_length: int = 512, temperature: float = 0.7) -> str:
@@ -61,19 +63,36 @@ class EmpatheticChatBot:
                 temperature=temperature,
                 do_sample=True,
                 top_p=0.9,
-                pad_token_id=self.tokenizer.eos_token_id,
-                eos_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+                use_cache=False  # キャッシュの問題を回避
             )
         
-        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=False)
         
-        assistant_start = full_response.find("<|start_header_id|>assistant<|end_header_id|>")
-        if assistant_start != -1:
-            response = full_response[assistant_start + len("<|start_header_id|>assistant<|end_header_id|>"):].strip()
+        # アシスタントの応答部分のみを抽出
+        if "<|assistant|>" in full_response:
+            response = full_response.split("<|assistant|>")[-1]
         else:
-            response = full_response.replace(prompt, "").strip()
+            # プロンプトを削除
+            response = full_response
         
-        return response
+        # 特殊トークンを削除
+        response = response.replace("<|end|>", "").replace("<|endoftext|>", "")
+        response = response.replace("<|system|>", "").replace("<|user|>", "")
+        response = response.replace("<|assistant|>", "")
+        
+        # システムプロンプトが含まれている場合は削除
+        if "You are an empathetic assistant" in response:
+            lines = response.split(".")
+            # システムプロンプトの文を除外
+            response = ". ".join([line for line in lines if "empathetic assistant" not in line and "warm, caring manner" not in line])
+        
+        # プロンプトのユーザー入力部分を削除
+        if user_input in response:
+            response = response.replace(user_input, "")
+        
+        return response.strip()
     
     def chat_loop(self):
         """対話ループ"""
@@ -112,7 +131,8 @@ def test_responses():
         "試験に落ちてしまいました"
     ]
     
-    chatbot = EmpatheticChatBot("meta-llama/Meta-Llama-3-8B-Instruct")
+    # 一般公開されているモデルを使用
+    chatbot = EmpatheticChatBot("microsoft/Phi-3-mini-4k-instruct")
     
     print("\n" + "="*50)
     print("Test Responses:")
@@ -126,7 +146,7 @@ def test_responses():
 
 def main():
     parser = argparse.ArgumentParser(description="Empathetic ChatBot")
-    parser.add_argument("--base_model", default="meta-llama/Meta-Llama-3-8B-Instruct", 
+    parser.add_argument("--base_model", default="microsoft/Phi-3-mini-4k-instruct", 
                        help="Base model path")
     parser.add_argument("--adapter_path", default=None, 
                        help="Path to fine-tuned LoRA adapter")
